@@ -3,7 +3,9 @@ import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:camera_test_task/screens/home/widgets/record_button.dart';
+import 'package:camera_test_task/screens/home/widgets/widgets.dart';
 import 'package:camera_test_task/utils/utils.dart';
+import 'package:camera_test_task/widgets/widgets.dart';
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -26,6 +28,10 @@ class _AppCameraViewState extends State<AppCameraView> {
   bool _isRecording = false;
   CameraLensDirection _currentLensDirection = CameraLensDirection.back;
   XFile? _overlayImageFile;
+
+  bool get isTakingPicture => _controller?.value.isTakingPicture ?? false;
+  bool get isRecordingVideo => _controller?.value.isRecordingVideo ?? false;
+  bool get isCapturing => isTakingPicture || isRecordingVideo;
 
   @override
   void initState() {
@@ -60,6 +66,7 @@ class _AppCameraViewState extends State<AppCameraView> {
     final overlayImageFile = _overlayImageFile;
 
     return Stack(
+      fit: StackFit.expand,
       children: [
         CameraPreview(controller),
         if (overlayImageFile != null)
@@ -67,6 +74,7 @@ class _AppCameraViewState extends State<AppCameraView> {
             opacity: 0.8,
             child: Image.file(File(overlayImageFile.path)),
           ),
+        if (_isRecording) const Positioned(top: 16, right: 16, child: RecordingIndicator()),
         if (_isCameraInitialized) _buildControls(),
       ],
     );
@@ -77,40 +85,57 @@ class _AppCameraViewState extends State<AppCameraView> {
       left: 16,
       right: 16,
       bottom: 16,
-      child: Row(
-        children: [
-          Expanded(
-            child: Row(
-              children: [
-                IconButton(
-                  onPressed: _onSwitchCameraTap,
-                  icon: const Icon(Icons.cameraswitch, color: Colors.white),
-                ),
-                IconButton(
-                  onPressed: _onManageOverlayTap,
-                  icon: Icon(
-                    _overlayImageFile == null ? Icons.add_circle_outline : Icons.remove_circle_outline,
-                    color: Colors.white,
+      child: SafeArea(
+        child: Row(
+          children: [
+            Expanded(
+              child: Row(
+                children: [
+                  Disabled(
+                    disabled: isCapturing,
+                    child: IconButton(
+                      onPressed: _onSwitchCameraTap,
+                      icon: const Icon(Icons.cameraswitch, color: Colors.white),
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: Center(
-              child: RecordButton(isRecording: _isRecording, onTap: _onRecordTap),
-            ),
-          ),
-          Expanded(
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: IconButton(
-                onPressed: _onTakePhotoTap,
-                icon: const Icon(Icons.image, color: Colors.white),
+                  Disabled(
+                    disabled: isCapturing,
+                    child: IconButton(
+                      onPressed: _onManageOverlayTap,
+                      icon: Icon(
+                        _overlayImageFile == null ? Icons.add_circle_outline : Icons.remove_circle_outline,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ),
-        ],
+            Expanded(
+              child: Center(
+                child: Disabled(
+                  disabled: isTakingPicture,
+                  child: RecordButton(
+                    isRecording: _isRecording,
+                    onTap: _onRecordTap,
+                  ),
+                ),
+              ),
+            ),
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Disabled(
+                  disabled: isCapturing,
+                  child: IconButton(
+                    onPressed: _onTakePhotoTap,
+                    icon: const Icon(Icons.image, color: Colors.white),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -181,10 +206,52 @@ class _AppCameraViewState extends State<AppCameraView> {
     });
   }
 
-  void _onRecordTap() {
-    setState(() {
-      _isRecording = !_isRecording;
-    });
+  Future<void> _onRecordTap() async {
+    if (_isRecording) {
+      await _stopVideoRecording();
+    } else {
+      await _startVideoRecording();
+    }
+  }
+
+  Future<void> _startVideoRecording() async {
+    final controller = _controller;
+    if (controller == null || !_isCameraInitialized || _isRecording) return;
+
+    try {
+      await controller.startVideoRecording();
+      setState(() {
+        _isRecording = true;
+      });
+    } on CameraException catch (e) {
+      if (mounted) {
+        ErrorHandler.showError(context, 'Start video recording error: ${e.description}');
+      }
+    }
+  }
+
+  Future<void> _stopVideoRecording() async {
+    final controller = _controller;
+    if (controller == null || !_isRecording) return;
+
+    try {
+      final xFile = await controller.stopVideoRecording();
+      setState(() {
+        _isRecording = false;
+      });
+
+      await FlutterImageGallerySaver.saveFile(xFile.path);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Video saved to gallery'), backgroundColor: Colors.green),
+        );
+      }
+    } on CameraException catch (e) {
+      if (mounted) {
+        ErrorHandler.showError(context, 'Stop video recording error: ${e.description}');
+      }
+    }
   }
 
   Future<void> _onTakePhotoTap() async {
