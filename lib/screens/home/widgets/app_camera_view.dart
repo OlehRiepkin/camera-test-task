@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:camera_test_task/screens/home/widgets/record_button.dart';
@@ -11,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_exif_rotation/flutter_exif_rotation.dart';
 import 'package:flutter_image_gallery_saver/flutter_image_gallery_saver.dart';
+import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 
 class AppCameraView extends StatefulWidget {
@@ -22,12 +24,13 @@ class AppCameraView extends StatefulWidget {
   State<AppCameraView> createState() => _AppCameraViewState();
 }
 
-class _AppCameraViewState extends State<AppCameraView> {
+class _AppCameraViewState extends State<AppCameraView> with WidgetsBindingObserver {
   CameraController? _controller;
   bool _isCameraInitialized = false;
   bool _isRecording = false;
   CameraLensDirection _currentLensDirection = CameraLensDirection.back;
   XFile? _overlayImageFile;
+  bool _overlaySelection = false;
 
   bool get isTakingPicture => _controller?.value.isTakingPicture ?? false;
   bool get isRecordingVideo => _controller?.value.isRecordingVideo ?? false;
@@ -36,6 +39,8 @@ class _AppCameraViewState extends State<AppCameraView> {
   @override
   void initState() {
     super.initState();
+
+    WidgetsBinding.instance.addObserver(this);
 
     final camera = widget.cameras.firstWhereOrNull(
       (camera) => camera.lensDirection == _currentLensDirection,
@@ -52,7 +57,8 @@ class _AppCameraViewState extends State<AppCameraView> {
 
   @override
   void dispose() {
-    unawaited(_controller?.dispose());
+    WidgetsBinding.instance.removeObserver(this);
+
     super.dispose();
   }
 
@@ -66,13 +72,15 @@ class _AppCameraViewState extends State<AppCameraView> {
     final overlayImageFile = _overlayImageFile;
 
     return Stack(
-      fit: StackFit.expand,
       children: [
         CameraPreview(controller),
         if (overlayImageFile != null)
           Opacity(
             opacity: 0.8,
-            child: Image.file(File(overlayImageFile.path)),
+            child: Image.file(
+              File(overlayImageFile.path),
+              fit: BoxFit.cover,
+            ),
           ),
         if (_isRecording) const Positioned(top: 16, right: 16, child: RecordingIndicator()),
         if (_isCameraInitialized) _buildControls(),
@@ -85,57 +93,55 @@ class _AppCameraViewState extends State<AppCameraView> {
       left: 16,
       right: 16,
       bottom: 16,
-      child: SafeArea(
-        child: Row(
-          children: [
-            Expanded(
-              child: Row(
-                children: [
-                  Disabled(
-                    disabled: isCapturing,
-                    child: IconButton(
-                      onPressed: _onSwitchCameraTap,
-                      icon: const Icon(Icons.cameraswitch, color: Colors.white),
-                    ),
-                  ),
-                  Disabled(
-                    disabled: isCapturing,
-                    child: IconButton(
-                      onPressed: _onManageOverlayTap,
-                      icon: Icon(
-                        _overlayImageFile == null ? Icons.add_circle_outline : Icons.remove_circle_outline,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: Center(
-                child: Disabled(
-                  disabled: isTakingPicture,
-                  child: RecordButton(
-                    isRecording: _isRecording,
-                    onTap: _onRecordTap,
-                  ),
-                ),
-              ),
-            ),
-            Expanded(
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: Disabled(
+      child: Row(
+        children: [
+          Expanded(
+            child: Row(
+              children: [
+                Disabled(
                   disabled: isCapturing,
                   child: IconButton(
-                    onPressed: _onTakePhotoTap,
-                    icon: const Icon(Icons.image, color: Colors.white),
+                    onPressed: _onSwitchCameraTap,
+                    icon: const Icon(Icons.cameraswitch, color: Colors.white),
                   ),
+                ),
+                Disabled(
+                  disabled: isCapturing && _overlayImageFile == null,
+                  child: IconButton(
+                    onPressed: _onManageOverlayTap,
+                    icon: Icon(
+                      _overlayImageFile == null ? Icons.add_circle_outline : Icons.remove_circle_outline,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: Center(
+              child: Disabled(
+                disabled: isTakingPicture,
+                child: RecordButton(
+                  isRecording: _isRecording,
+                  onTap: _onRecordTap,
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: Disabled(
+                disabled: isCapturing,
+                child: IconButton(
+                  onPressed: _onTakePhotoTap,
+                  icon: const Icon(Icons.image, color: Colors.white),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -192,6 +198,7 @@ class _AppCameraViewState extends State<AppCameraView> {
       return;
     }
 
+    _overlaySelection = true;
     final picker = ImagePicker();
     XFile? pickedFile;
 
@@ -230,7 +237,7 @@ class _AppCameraViewState extends State<AppCameraView> {
     }
   }
 
-  Future<void> _stopVideoRecording() async {
+  Future<void> _stopVideoRecording({bool saveFile = true}) async {
     final controller = _controller;
     if (controller == null || !_isRecording) return;
 
@@ -239,6 +246,10 @@ class _AppCameraViewState extends State<AppCameraView> {
       setState(() {
         _isRecording = false;
       });
+
+      if (!saveFile) {
+        return;
+      }
 
       await FlutterImageGallerySaver.saveFile(xFile.path);
 
@@ -263,7 +274,15 @@ class _AppCameraViewState extends State<AppCameraView> {
     try {
       final xFile = await controller.takePicture();
       final rotatedImageFile = await FlutterExifRotation.rotateImage(path: xFile.path);
-      final bytes = await rotatedImageFile.readAsBytes();
+      var bytes = await rotatedImageFile.readAsBytes();
+
+      if (controller.description.lensDirection == CameraLensDirection.front) {
+        final originalImage = img.decodeImage(bytes);
+        if (originalImage != null) {
+          final mirrored = img.flipHorizontal(originalImage);
+          bytes = Uint8List.fromList(img.encodeJpg(mirrored));
+        }
+      }
 
       await FlutterImageGallerySaver.saveImage(bytes);
 
@@ -275,6 +294,37 @@ class _AppCameraViewState extends State<AppCameraView> {
     } on Exception catch (e) {
       if (mounted) {
         ErrorHandler.showError(context, 'Camera error: $e');
+      }
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) {
+      return;
+    }
+
+    if (state == AppLifecycleState.inactive) {
+      if (_overlaySelection) {
+        return;
+      }
+
+      unawaited(_stopVideoRecording(saveFile: false).whenComplete(controller.dispose));
+      return;
+    }
+
+    if (state == AppLifecycleState.resumed) {
+      if (_overlaySelection) {
+        _overlaySelection = false;
+        return;
+      }
+
+      final camera = widget.cameras.firstWhereOrNull(
+        (camera) => camera.lensDirection == _currentLensDirection,
+      );
+      if (camera != null) {
+        unawaited(_setupCamera(camera));
       }
     }
   }

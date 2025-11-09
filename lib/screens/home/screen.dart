@@ -83,7 +83,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       return _buildErrorUI();
     }
 
-    return AppCameraView(cameras: cameras);
+    return Center(child: AppCameraView(cameras: cameras));
   }
 
   Future<void> _initializeCamera() async {
