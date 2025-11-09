@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:camera/camera.dart';
 import 'package:camera_test_task/screens/home/widgets/widgets.dart';
 import 'package:camera_test_task/utils/utils.dart';
@@ -14,7 +16,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
-  var _homeStatus = HomeStatus.initial;
+  HomeStatus _homeStatus = HomeStatus.initial;
 
   List<CameraDescription>? _cameras;
   String? _errorMessage;
@@ -25,7 +27,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.initState();
 
     WidgetsBinding.instance.addObserver(this);
-    _initializeCamera();
+    unawaited(_initializeCamera());
   }
 
   @override
@@ -61,20 +63,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       mainAxisSize: MainAxisSize.min,
       spacing: 16,
       children: [
-        Text(
+        const Text(
           'No camera or microphone permission. Please grant permission in app settings.',
           textAlign: TextAlign.center,
         ),
         ElevatedButton(
           onPressed: _onOpenAppSettingsTap,
-          child: Text('Open App Settings'),
+          child: const Text('Open App Settings'),
         ),
       ],
     ),
   );
 
-  Widget _buildErrorUI() =>
-      Center(child: Text(_errorMessage ?? 'An error occurred'));
+  Widget _buildErrorUI() => Center(child: Text(_errorMessage ?? 'An error occurred'));
 
   Widget _buildReadyUI() {
     final cameras = _cameras;
@@ -91,8 +92,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       Permission.microphone,
     ].request();
 
-    if (!permissionsStatus[Permission.camera]!.isGranted ||
-        !permissionsStatus[Permission.microphone]!.isGranted) {
+    if (!permissionsStatus[Permission.camera]!.isGranted || !permissionsStatus[Permission.microphone]!.isGranted) {
       setState(() {
         _homeStatus = HomeStatus.noPermission;
       });
@@ -132,11 +132,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (mounted) {
         ErrorHandler.showError(context, 'Failed to open app settings.');
       }
-    } catch (e) {
+    } on Exception catch (e) {
       if (mounted) {
         ErrorHandler.showError(
           context,
-          'Failed to open app settings. ${e.toString()}',
+          'Failed to open app settings. $e',
         );
       }
     }
@@ -148,7 +148,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     if (state == AppLifecycleState.resumed && _needReinitializeCamera) {
       _needReinitializeCamera = false;
-      _initializeCamera();
+      unawaited(_initializeCamera());
     }
   }
 }
