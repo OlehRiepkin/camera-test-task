@@ -310,6 +310,10 @@ class _AppCameraViewState extends State<AppCameraView> with WidgetsBindingObserv
         return;
       }
 
+      setState(() {
+        _isCameraInitialized = false;
+      });
+
       unawaited(_stopVideoRecording(saveFile: false).whenComplete(controller.dispose));
       return;
     }
